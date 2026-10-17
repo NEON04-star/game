@@ -22,7 +22,8 @@
       /* Dynamic sizing variables */
       --grid-size: min(440px, 88vw, 52vh);
       --cell-gap: calc(var(--grid-size) * 0.032);
-      --cell-size: calc((var(--grid-size) - (var(--cell-gap) * 5)) / 4);
+      --board-padding: var(--cell-gap);
+      --cell-size: calc((var(--grid-size) - (var(--board-padding) * 2) - (var(--cell-gap) * 3)) / 4);
       --board-radius: 12px;
       --tile-radius: 8px;
       --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -330,10 +331,19 @@
     }
 
     .instructions-text {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-muted);
       line-height: 1.25;
       font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    @media (max-width: 380px) {
+      .instructions-text {
+        display: none;
+      }
     }
 
     .btn-group {
@@ -400,10 +410,11 @@
       height: var(--grid-size);
       background-color: var(--bg-board);
       border-radius: var(--board-radius);
-      padding: var(--cell-gap);
+      padding: var(--board-padding);
       box-shadow: var(--board-shadow);
       touch-action: none; /* Prevent browser scrolling on swipe */
       transition: background-color 0.25s ease, box-shadow 0.25s ease;
+      box-sizing: border-box;
     }
 
     .grid-container {
@@ -413,6 +424,7 @@
       gap: var(--cell-gap);
       width: 100%;
       height: 100%;
+      box-sizing: border-box;
     }
 
     .grid-cell {
@@ -420,16 +432,18 @@
       border-radius: var(--tile-radius);
       width: 100%;
       height: 100%;
+      box-sizing: border-box;
       transition: background-color 0.25s ease;
     }
 
     .tile-container {
       position: absolute;
-      top: var(--cell-gap);
-      left: var(--cell-gap);
-      right: var(--cell-gap);
-      bottom: var(--cell-gap);
+      top: var(--board-padding);
+      left: var(--board-padding);
+      width: calc(100% - (var(--board-padding) * 2));
+      height: calc(100% - (var(--board-padding) * 2));
       pointer-events: none;
+      box-sizing: border-box;
     }
 
     .tile {
@@ -1645,10 +1659,33 @@
           const container = document.getElementById('tileContainer');
           if (!container) return;
 
-          // Read actual layout parameters from the DOM container
-          const containerWidth = container.clientWidth;
-          const cellGap = containerWidth * 0.032;
-          const cellSize = (containerWidth - (cellGap * 5)) / 4;
+          const gridCells = document.querySelectorAll('.grid-cell');
+          const containerRect = container.getBoundingClientRect();
+
+          // Helper to get exact pixel coordinates directly aligned with background grid cells
+          const getCellPos = (row, col) => {
+            const idx = row * 4 + col;
+            const cell = gridCells[idx];
+            if (cell && containerRect.width > 0) {
+              const cr = cell.getBoundingClientRect();
+              return {
+                x: cr.left - containerRect.left,
+                y: cr.top - containerRect.top,
+                w: cr.width,
+                h: cr.height
+              };
+            }
+            // Deterministic fallback if rendered off-screen or during headless tests
+            const cWidth = container.clientWidth || 360;
+            const gap = cWidth * 0.032;
+            const size = (cWidth - (gap * 3)) / 4;
+            return {
+              x: col * (size + gap),
+              y: row * (size + gap),
+              w: size,
+              h: size
+            };
+          };
 
           // Track existing tile elements by data-id
           const existingElements = new Map();
@@ -1660,8 +1697,7 @@
 
           this.tiles.forEach(tile => {
             currentIds.add(tile.id);
-            const x = cellGap + tile.col * (cellSize + cellGap);
-            const y = cellGap + tile.row * (cellSize + cellGap);
+            const pos = getCellPos(tile.row, tile.col);
 
             let tileEl = existingElements.get(tile.id);
 
@@ -1671,19 +1707,19 @@
               tileEl.dataset.id = tile.id;
               tileEl.className = `tile tile-val-${tile.value >= 4096 ? 'super' : tile.value} tile-new`;
               tileEl.textContent = tile.value;
-              tileEl.style.width = `${cellSize}px`;
-              tileEl.style.height = `${cellSize}px`;
-              tileEl.style.setProperty('--target-x', `${x}px`);
-              tileEl.style.setProperty('--target-y', `${y}px`);
-              tileEl.style.transform = `translate(${x}px, ${y}px)`;
+              tileEl.style.width = `${pos.w}px`;
+              tileEl.style.height = `${pos.h}px`;
+              tileEl.style.setProperty('--target-x', `${pos.x}px`);
+              tileEl.style.setProperty('--target-y', `${pos.y}px`);
+              tileEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
               container.appendChild(tileEl);
             } else {
-              // Update position and styling of existing tile
-              tileEl.style.width = `${cellSize}px`;
-              tileEl.style.height = `${cellSize}px`;
-              tileEl.style.setProperty('--target-x', `${x}px`);
-              tileEl.style.setProperty('--target-y', `${y}px`);
-              tileEl.style.transform = `translate(${x}px, ${y}px)`;
+              // Update position and sizing of existing tile
+              tileEl.style.width = `${pos.w}px`;
+              tileEl.style.height = `${pos.h}px`;
+              tileEl.style.setProperty('--target-x', `${pos.x}px`);
+              tileEl.style.setProperty('--target-y', `${pos.y}px`);
+              tileEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
 
               // Update value and class if changed (merged)
               const valClass = `tile-val-${tile.value >= 4096 ? 'super' : tile.value}`;
@@ -1768,10 +1804,13 @@
             e.preventDefault();
           }, { passive: false });
 
-          // Window Resize -> Re-render tiles at new pixel positions
-          window.addEventListener('resize', () => {
-            this.render();
-          });
+          // Window Resize & Orientation -> Re-render tiles at new pixel positions
+          const handleResize = () => {
+            requestAnimationFrame(() => this.render());
+          };
+          window.addEventListener('resize', handleResize);
+          window.addEventListener('orientationchange', handleResize);
+          window.addEventListener('load', handleResize);
 
           // Action Buttons
           document.getElementById('newGameBtn').addEventListener('click', () => this.startNewGame());
